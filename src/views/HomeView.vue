@@ -23,6 +23,7 @@ interface SeedData {
 
 type FilteredSeedData = SeedData | {
   type: 'skip';
+  seed?: number;
   count: number;
 };
 
@@ -61,6 +62,7 @@ const relevantSeeds = computed(() => {
   const rng = new CRandom16(seed.value);
   const result: FilteredSeedData[] = [];
   let skipped = 0;
+  let firstSkippedSeed = 0;
   let found = 0;
   for (let i = 0; i < seedsToSearch.value; i++) {
     const seed: SeedData = {
@@ -85,11 +87,12 @@ const relevantSeeds = computed(() => {
     if (relevant) {
       found++;
       if (skipped > 0) {
-        result.push({ type: "skip", count: skipped });
+        result.push({ type: "skip", count: skipped, seed: firstSkippedSeed });
         skipped = 0;
       }
       result.push({ ...seed });
     } else {
+      firstSkippedSeed = seed.seed;
       skipped++;
     }
     rng.next();
@@ -174,7 +177,7 @@ function formatFloat(num: number): string {
       <span v-if="running">
         <span>Finding seed ... {{ formatPercent(progress) }} ({{ formatHex(checked) }} of {{
           formatHex(0xFFFF_FFFF)
-          }})</span>
+        }})</span>
       </span>
       <span v-else>
         <button v-if="foundSeedNumber != seed" @click="findSeed(seed)">Find absolute #</button>
@@ -187,18 +190,12 @@ function formatFloat(num: number): string {
     </div>
 
     <div>
-      <label>
-        <input type="checkbox" v-model="filterOnlyUsefulSeeds" />
-        Show within
-      </label>
-      <label>
-        <input type="number" v-model="okWindow" :disabled="running" min="0" :max="TIMER2TO4_MAX - TIMER2TO4_MIN" />
-        Frames
-      </label>
-      <label>
-        <input type="number" v-model="seedsToSearch" :disabled="running" />
-        Seeds to search
-      </label>
+      <input type="checkbox" v-model="filterOnlyUsefulSeeds" />
+      Show within
+      <input type="number" v-model="okWindow" :disabled="running" min="0" :max="TIMER2TO4_MAX - TIMER2TO4_MIN" />
+      seeds, search up to
+      <input type="number" v-model="seedsToSearch" :disabled="running" />
+      seeds
     </div>
 
     <div>
@@ -212,7 +209,7 @@ function formatFloat(num: number): string {
             <th>Round 1</th>
             <th>Round 2-4</th>
           </tr>
-          <tr v-for="seed in (filterOnlyUsefulSeeds ? relevantSeeds : upcomingSeeds)" :key="seed.index">
+          <tr v-for="seed in (filterOnlyUsefulSeeds ? relevantSeeds : upcomingSeeds)" :key="seed.seed">
             <template v-if="seed.type == 'skip'">
               <td colspan="6" class="skip">
                 <span>...{{ seed.count }} seeds...</span>
