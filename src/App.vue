@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { RouterView } from 'vue-router'
+import SeedSearchView from './views/SeedSearchView.vue';
+
 </script>
 
 <template>
-  <!-- <RouterLink to="/">Home</RouterLink> -->
-  <!-- <RouterLink to="/about">About</RouterLink> -->
-  <RouterView />
+  <SeedSearchView />
 </template>
 
 <style scoped lang="scss">
