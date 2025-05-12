@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import SeedFinderWorker from "@/lib/SeedFinderWorker?worker";
-import {computed, ref} from "vue";
-import {CRandom16} from "@/lib/CRandom16";
+import { computed, ref } from "vue";
+import { CRandom16 } from "@/lib/CRandom16";
 import {
   lookupTimer1Frames,
   lookupTimer2to4Frames,
@@ -11,8 +11,22 @@ import {
   TIMER2TO4_MIN
 } from "@/lib/TimerLookupTables";
 
-const worker = new SeedFinderWorker();
+interface SeedData {
+  type: 'seed';
+  seed: number;
+  index: number;
+  value: number;
+  float: number;
+  timer1: number;
+  timer2to4: number;
+}
 
+type FilteredSeedData = SeedData | {
+  type: 'skip';
+  count: number;
+};
+
+const worker = new SeedFinderWorker();
 
 const seedStringHex = ref("00000000");
 // const seedStringHex = ref("4CBFD3D");
@@ -20,15 +34,70 @@ const seed = computed(() => {
   const cleaned = seedStringHex.value.replace(/[^!0-9A-Fa-f]+/mg, '');
   return parseInt(cleaned, 16) & 0xFFFF_FFFF
 });
+const okWindow = ref(5);
+const filterOnlyUsefulSeeds = ref(true);
+const seedsToSearch = ref(100000);
 
+const seedsToShow = 200;
 const upcomingSeeds = computed(() => {
   const rng = new CRandom16(seed.value);
-  const result: number[] = [];
-  for (let i = 1; i <= 100; i++) {
-    result.push(rng.seed);
+  const result: SeedData[] = [];
+  for (let i = 1; i <= seedsToShow; i++) {
+    result.push({
+      type: 'seed',
+      index: i,
+      seed: rng.seed,
+      value: rng.current(),
+      float: rng.float(),
+      timer1: lookupTimer1Frames(rng.seed),
+      timer2to4: lookupTimer2to4Frames(rng.seed)
+    });
     rng.next();
   }
   return result;
+});
+
+const relevantSeeds = computed(() => {
+  const rng = new CRandom16(seed.value);
+  const result: FilteredSeedData[] = [];
+  let skipped = 0;
+  let found = 0;
+  for (let i = 0; i < seedsToSearch.value; i++) {
+    const seed: SeedData = {
+      type: 'seed',
+      index: i,
+      seed: rng.seed,
+      value: rng.current(),
+      float: rng.float(),
+      timer1: lookupTimer1Frames(rng.seed),
+      timer2to4: lookupTimer2to4Frames(rng.seed)
+    };
+    let relevant = false;
+    if (seed.timer1 == TIMER1_MIN) {
+      relevant = true;
+    } else if (seed.timer1 <= TIMER1_MIN + okWindow.value) {
+      relevant = true;
+    } else if (seed.timer2to4 == TIMER2TO4_MIN) {
+      relevant = true;
+    } else if (seed.timer2to4 <= TIMER2TO4_MIN + okWindow.value) {
+      relevant = true;
+    }
+    if (relevant) {
+      found++;
+      if (skipped > 0) {
+        result.push({ type: "skip", count: skipped });
+        skipped = 0;
+      }
+      result.push({ ...seed });
+    } else {
+      skipped++;
+    }
+    rng.next();
+    if (found >= seedsToShow) {
+      break;
+    }
+  }
+  return result
 });
 
 // seed finder
@@ -51,7 +120,7 @@ worker.addEventListener("message", (event) => {
 });
 
 function findSeed(seed: number) {
-  worker.postMessage({type: "find", seed});
+  worker.postMessage({ type: "find", seed });
   running.value = true;
 }
 
@@ -82,8 +151,18 @@ function formatFloat(num: number): string {
   color: rgba(0, 255, 0, 0.5);
 }
 
+.ok {
+  color: rgba(255, 255, 0, 0.5);
+}
+
 .worst {
   color: rgba(255, 0, 0, 0.5);
+}
+
+.skip {
+  color: rgba(255, 255, 255, 0.3);
+  font-style: italic;
+  padding-left: 4em;
 }
 </style>
 
@@ -92,50 +171,75 @@ function formatFloat(num: number): string {
     <div>
       <input type="text" v-model="seedStringHex" :disabled="running">
       Seed: {{ formatHex(seed) }}
-    </div>
-
-    <div>
-      <div v-if="running">
+      <span v-if="running">
         <span>Finding seed ... {{ formatPercent(progress) }} ({{ formatHex(checked) }} of {{
-            formatHex(0xFFFF_FFFF)
+          formatHex(0xFFFF_FFFF)
           }})</span>
-      </div>
-      <div v-else>
-        <button @click="findSeed(seed)">Find seed #</button>
-        <span>
-          Seed #:
+      </span>
+      <span v-else>
+        <button v-if="foundSeedNumber != seed" @click="findSeed(seed)">Find absolute #</button>
+        <span v-else>
+          Absolute Seed #:
           <span v-if="foundSeedNumber == seed">{{ formatHex(index) }} | {{ index }}</span>
           <span v-else>Unknown</span>
         </span>
-      </div>
+      </span>
+    </div>
+
+    <div>
+      <label>
+        <input type="checkbox" v-model="filterOnlyUsefulSeeds" />
+        Show within
+      </label>
+      <label>
+        <input type="number" v-model="okWindow" :disabled="running" min="0" :max="TIMER2TO4_MAX - TIMER2TO4_MIN" />
+        Frames
+      </label>
+      <label>
+        <input type="number" v-model="seedsToSearch" :disabled="running" />
+        Seeds to search
+      </label>
     </div>
 
     <div>
       <table>
-        <tr>
-          <th>Seed</th>
-          <th>Next</th>
-          <th>Float</th>
-          <th>Round 1</th>
-          <th>Round 2-4</th>
-        </tr>
-        <tr v-for="seed in upcomingSeeds" :key="seed">
-          <td>{{ formatHex(seed) }}</td>
-          <td>{{ new CRandom16(seed).current() }}</td>
-          <td>{{ formatFloat(new CRandom16(seed).float()) }}</td>
-          <td :class="{
-            best: lookupTimer1Frames(seed) == TIMER1_MIN,
-            worst: lookupTimer1Frames(seed) == TIMER1_MAX
-          }">
-            {{ lookupTimer1Frames(seed) }}
-          </td>
-          <td :class="{
-            best: lookupTimer2to4Frames(seed) == TIMER2TO4_MIN,
-            worst: lookupTimer2to4Frames(seed) == TIMER2TO4_MAX
-          }">
-            {{ lookupTimer2to4Frames(seed) }}
-          </td>
-        </tr>
+        <tbody>
+          <tr>
+            <th>#</th>
+            <th>Seed</th>
+            <th>Next</th>
+            <th>Float</th>
+            <th>Round 1</th>
+            <th>Round 2-4</th>
+          </tr>
+          <tr v-for="seed in (filterOnlyUsefulSeeds ? relevantSeeds : upcomingSeeds)" :key="seed.index">
+            <template v-if="seed.type == 'skip'">
+              <td colspan="6" class="skip">
+                <span>...{{ seed.count }} seeds...</span>
+              </td>
+            </template>
+            <template v-else>
+              <td>{{ seed.index }}</td>
+              <td>{{ formatHex(seed.seed) }}</td>
+              <td>{{ seed.value }}</td>
+              <td>{{ formatFloat(seed.float) }}</td>
+              <td :class="{
+                best: seed.timer1 == TIMER1_MIN,
+                ok: seed.timer1 > TIMER1_MIN && seed.timer1 <= TIMER1_MIN + okWindow,
+                worst: seed.timer1 == TIMER1_MAX
+              }">
+                {{ seed.timer1 }}
+              </td>
+              <td :class="{
+                best: seed.timer2to4 == TIMER2TO4_MIN,
+                ok: seed.timer2to4 > TIMER2TO4_MIN && seed.timer2to4 <= TIMER2TO4_MIN + okWindow,
+                worst: seed.timer2to4 == TIMER2TO4_MAX
+              }">
+                {{ seed.timer2to4 }}
+              </td>
+            </template>
+          </tr>
+        </tbody>
       </table>
     </div>
 

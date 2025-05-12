@@ -2,7 +2,7 @@ import {CRandom16} from "@/lib/CRandom16";
 
 
 const FPS = 60.0;
-const FRAME_TIME = 1.0 / FPS;
+const FRAME_TIME = Math.fround(1.0 / FPS);
 
 const timer1LookupTable: [number, number][] = [];
 const timer2to4LookupTable: [number, number][] = [];
@@ -37,11 +37,14 @@ export function lookupTimer2to4Frames(seed: number): number {
 }
 
 function countFrames(time: number): number {
-  let time_frames = 0;
-  let counter = time;
-  while (counter > 0) {
-    counter -= FRAME_TIME;
-    time_frames++;
-  }
-  return time_frames;
+  // let time_frames = 0;
+  // let counter = Math.fround(time);
+  // while (counter > 0) {
+  //   counter = Math.fround(counter - FRAME_TIME);
+  //   time_frames++;
+  // }
+  // return time_frames;
+  // because javascript uses doubles, the above doesn't seem to work. This is what works in mp1, experimentally
+  // (it's also much faster)
+  return Math.ceil(Math.fround(time) / FRAME_TIME);
 }
